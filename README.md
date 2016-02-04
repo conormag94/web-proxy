@@ -1,2 +1,2 @@
-# proxy-server
+# web-proxy
 Python web proxy server
