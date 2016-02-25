@@ -25,15 +25,16 @@ def proxy_thread(clientsocket, address):
     request = clientsocket.recv(4096).decode()
     print(request)
 
-    first_line = request.split('\n')[0]
-    url = first_line.split(' ')[1]
-    cached_name = url.replace('/', '')
+    first_line = request.split('\n')[0]     # eg: GET http://google.ie
+    url = first_line.split(' ')[1]          # eg: http://google.ie or http://www.google.ie
+    cached_name = url.replace('/', '')      # stripping awkward characters to make a cached file name
 
-    http_pos = url.find('://')
-    website = url[http_pos+3:]
+    http_pos = url.find('://')          
+    website = url[http_pos+3:]              # eg: google.ie or www.google.ie
     temp = website.replace('www.', '')
 
-    slash_pos = temp.find('/')
+    # if there is a trailing slash, don't include it
+    slash_pos = temp.find('/')              
     if slash_pos == -1:
         hostname = temp
     else:
@@ -46,8 +47,9 @@ def proxy_thread(clientsocket, address):
         clientsocket.close()
     else:
         try:
+            # if the site is cached, send client cached version instead of retrieving from server
             if in_cache(cached_name):
-                print("In Cache")
+                print("[*] Cache hit - Retrieving from cache...")
                 f = open(cached_name, 'rb')
                 data = f.read(4096)
                 while (len(data) > 0):
@@ -55,8 +57,9 @@ def proxy_thread(clientsocket, address):
                     data = f.read(4096)
                 clientsocket.close()
                 f.close()
+            # if not cached, make a new cache file and fill it with data retrieved from server
             else:
-                print("Not in cache")
+                print("[*] Cache miss - Retrieving from server...")
                 f = open(cached_name, 'wb')
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect((hostname, 80))
