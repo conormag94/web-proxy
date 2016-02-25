@@ -1,41 +1,138 @@
 import sys
 import socket
 import threading
+import click
 
+# Returns True if there is a already a cached file named fname, False otherwise
+def in_cache(fname):
+    try:
+        f = open(fname, 'rb')
+        return True
+    except IOError:
+        return False
+
+# Returns whether or not website is blocked in the blocklist
 def website_blocked(website):
     with open ('blocklist.txt', 'r') as blocklist:
         for line in blocklist:
-            print(line)
             if website in line:
                 return True
     return False
 
+# Handles a http request which has come in from clientsocket
 def proxy_thread(clientsocket, address):
-    print("Started a thread")
-    ip, port = address
-    print("Client IP:", ip, "Port:", port)
+
     request = clientsocket.recv(4096).decode()
     print(request)
 
-    website = 'thing'
-    response = 'This is passing through the proxy'
-    if website_blocked(website):
-        response = website + ' is blocked by the proxy'
+    first_line = request.split('\n')[0]
+    url = first_line.split(' ')[1]
+    cached_name = url.replace('/', '')
 
-    clientsocket.send(response.encode())
-    clientsocket.close()
+    http_pos = url.find('://')
+    website = url[http_pos+3:]
+    temp = website.replace('www.', '')
 
-def main():
-    print(sys.argv)
+    slash_pos = temp.find('/')
+    if slash_pos == -1:
+        hostname = temp
+    else:
+        hostname = temp[:slash_pos]
+    #print("Host: " + hostname)
 
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(('', 8080))
-    s.listen(5)
+    if website_blocked(hostname):
+        response = '<h1>' + hostname + ' is blocked by the proxy</h1>'
+        clientsocket.send(response.encode())
+        clientsocket.close()
+    else:
+        try:
+            if in_cache(cached_name):
+                print("In Cache")
+                f = open(cached_name, 'rb')
+                data = f.read(4096)
+                while (len(data) > 0):
+                    clientsocket.send(data)
+                    data = f.read(4096)
+                clientsocket.close()
+                f.close()
+            else:
+                print("Not in cache")
+                f = open(cached_name, 'wb')
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.connect((hostname, 80))
+                s.send(request.encode())
 
-    while True:
-        (clientsocket, address) = s.accept()
-        threading.Thread(target=proxy_thread, args=(clientsocket, address)).start()
-    s.close()
+                while 1:
+                    # receive data from web server
+                    data = s.recv(4096)
+
+                    if (len(data) > 0):
+                        # send to browser
+                        f.write(data)
+                        clientsocket.send(data)
+                    else:
+                        break
+                f.close()
+                s.close()
+                clientsocket.close()
+        except socket.error:
+            if s:
+                s.close()
+            if clientsocket:
+                clientsocket.close()
+            sys.exit(1)
+
+# These are commands for blocking/unblocking a website
+# Usage: python3 proxy.py --block=google.com or python3 proxy.py -b google.com
+@click.command()
+@click.option('--block', '-b', help='Add a site to the list of blocked sites')
+@click.option('--unblock', '-u', help='Remove a site from the list of blocked sites')
+def main(block, unblock):
+    # If the website is already blocked, don't do anything. If not, block it
+    if block:
+        if website_blocked(block):
+            print(block + " is already blocked")
+        else:
+            with open('blocklist.txt', 'a') as blocklist:
+                blocklist.write(block)
+            print(block + " added to blocklist")
+
+    # If the website is already unblocked, don't do anything. If not, block it
+    elif unblock:
+        if not website_blocked(unblock):
+            print(unblock + " is already unblocked")
+        else:
+            f = open('blocklist.txt', 'r')
+            lines = f.readlines()
+            f.close()
+
+            with open('blocklist.txt', 'w') as out:
+                for line in lines:
+                    line_str = line.strip('\n')
+                    if line_str != unblock:
+                        out.write(line)
+            print(unblock + " removed from blocklist")
+
+    # Starting the proxy server as normal
+    else:
+        print("Starting proxy server...")
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(('', 8080))
+            s.listen(20)
+            print("Listening on port 8080")
+            print("======================\n")
+        except Exception:
+            if s:
+                s.close()
+            print(message)
+            sys.exit(1)
+
+        # Listen for incoming requests and dispatch a new Thread to handle each one
+        while 1:
+            (clientsocket, address) = s.accept()
+            threading.Thread(target=proxy_thread, args=(clientsocket, address)).start()
+        s.close()
 
 if __name__ == '__main__':
     try:
